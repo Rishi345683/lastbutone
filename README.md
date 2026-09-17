@@ -1,68 +1,201 @@
 # AI Cloud Cost Optimizer
 
-Initial hackathon slice: a FastAPI backend serving resources from an in-memory cloud simulator. Recommendation decisions and audit logs are persisted in SQLite. No real cloud credentials or cloud operations are used.
+AI Cloud Cost Optimizer is a local hackathon demonstration of cloud cost analysis and approval-based optimization. It uses a simulated cloud-resource layer, a FastAPI backend, an Angular dashboard, and SQLite persistence. It does not connect to AWS, Azure, GCP, or real production infrastructure.
 
-## Run the backend
+Repository: https://github.com/Rishi345683/lastbutone
 
-From the project root:
+## What The Demo Shows
+
+The application scans simulated virtual machines and seven days of utilization history. It analyzes:
+
+- CPU and RAM utilization
+- Disk and network utilization
+- Requests per minute
+- Error rate and average latency
+- Idle hours per day
+- Environment and criticality
+- Monthly cost
+
+The system creates a recommendation only when a resource is underutilized, operationally idle, reliable, sufficiently inactive, and not high criticality. Estimated savings are calculated as 30% of the simulated monthly cost.
+
+The workflow is:
+
+```text
+pending_approval -> approved -> optimized
+pending_approval -> auto_approved -> optimized
+pending_approval -> rejected
+```
+
+Approval is required before a simulated resize. The automatic path is used when the approval deadline expires.
+
+## Project Structure
+
+```text
+backend/
+	app/
+		ai_agent.py       AI/LLM summary generation
+		database.py       SQLite configuration and persistence
+		main.py           FastAPI routes and approval monitor
+		models.py         Pydantic API models
+		simulator.py      Simulated VMs, analysis, decisions, and execution
+	tests/
+		test_backend.py   Backend workflow tests
+frontend/
+	src/app/
+		app.ts            Dashboard state and API calls
+		app.html          Dashboard layout and controls
+		app.css           Dashboard styling
+postman/
+	AI-Cloud-Cost-Optimizer.postman_collection.json
+```
+
+## Run Locally
+
+Install backend dependencies from the project root:
 
 ```powershell
 cd backend
 python -m pip install -r requirements.txt
+```
+
+Start the backend:
+
+```powershell
 python -m uvicorn app.main:app --reload
 ```
 
-The API is available at `http://127.0.0.1:8000`.
+The backend runs at `http://127.0.0.1:8000`.
 
-## Test the APIs
-
-- Health check: `GET http://127.0.0.1:8000/`
-- Simulated resources: `GET http://127.0.0.1:8000/resources`
-- Historical metrics: `GET http://127.0.0.1:8000/metrics`
-- Utilization analysis: `GET http://127.0.0.1:8000/analysis`
-- AI summary: `GET http://127.0.0.1:8000/agent/summary`
-- Recommendations: `GET http://127.0.0.1:8000/recommendations`
-- Approve recommendation: `POST http://127.0.0.1:8000/recommendations/{id}/approve`
-- Reject recommendation: `POST http://127.0.0.1:8000/recommendations/{id}/reject`
-- Execute approved recommendation: `POST http://127.0.0.1:8000/recommendations/{id}/execute`
-- Audit logs: `GET http://127.0.0.1:8000/audit-logs`
-- Interactive API documentation: `http://127.0.0.1:8000/docs`
-
-The `/resources` endpoint returns eight deterministic simulated virtual machines. Their data is held in memory and resets when the server restarts.
-
-The `/metrics` endpoint returns seven days of simulated CPU and RAM utilization. The `/analysis` endpoint calculates average utilization, flags underutilized VMs, and estimates potential savings at 30% of monthly cost. These are estimates only; no optimization action is performed yet.
-
-Resource analysis also considers disk utilization, network utilization, request rate, error rate, average latency, criticality, and idle hours per day. The dashboard displays idle hours as `Idle Xh/day`. A resource is only treated as an optimization candidate when its CPU/RAM usage and activity are low, it has at least eight idle hours per day, its reliability signals are safe, and it is not high criticality.
-
-The `/agent/summary` endpoint uses a safe local fallback by default. To connect an optional OpenAI-compatible service, set `LLM_API_URL`, `LLM_API_KEY`, and optionally `LLM_MODEL` as environment variables. Keys are never stored in source code, and the agent only analyzes data; it cannot execute simulator actions.
-
-## Run backend tests
-
-From the `backend` directory:
-
-```powershell
-python -m unittest discover -s tests -p "test_*.py" -v
-```
-
-The tests use a temporary SQLite database and cover discovery, analysis, approval gating, simulated execution, and audit persistence.
-
-## Run the Angular dashboard
-
-In a second terminal, from the project root:
+In a second terminal, install and start the Angular dashboard:
 
 ```powershell
 cd frontend
+npm install
 npm start
 ```
 
-Open `http://localhost:4200`. Start the FastAPI backend first so the dashboard can load simulated resources and recommendations.
+The dashboard runs at `http://localhost:4200`.
 
-## Test with Postman
+## Demo Configuration
 
-Import [AI-Cloud-Cost-Optimizer.postman_collection.json](postman/AI-Cloud-Cost-Optimizer.postman_collection.json) into Postman. The collection uses `http://127.0.0.1:8000` by default and runs the local-only workflow from health check through audit logs. Set `recommendationId` to a pending recommendation before running the approval request.
+The default demo approval window is three minutes:
 
-The `/recommendations` endpoint creates recommendations for underutilized VMs. In demo mode, each recommendation has a 3-minute approval window. If nobody approves or rejects before the deadline, the background monitor automatically approves the recommendation, runs the same safety checks, downsizes eligible simulated resources, and records the action in `/audit-logs`. Decisions and audit logs are persisted in `backend/costopti.db` and survive server restarts. The simulated VM state itself resets when the server restarts.
+```powershell
+$env:COSTOPTI_APPROVAL_WAIT_MINUTES = "3"
+```
 
-To use the intended 24-hour behavior, set `COSTOPTI_APPROVAL_WAIT_MINUTES=1440` before starting FastAPI. The default is `3` minutes for hackathon testing.
+At startup, the backend seeds up to three random eligible pending recommendations. Their deadlines are staggered randomly within approximately the configured approval window. Existing pending recommendations are preserved, and duplicate resource recommendations are not created.
 
-The execute endpoint performs a simulated resize only after approval. Production changes are blocked by policy. Non-production actions run a health check; failed checks restore the original simulated VM state. All executed actions are available through `/audit-logs`.
+The number of startup recommendations can be changed:
+
+```powershell
+$env:COSTOPTI_DEMO_RECOMMENDATION_COUNT = "3"
+```
+
+For a production-like approval period, use 24 hours instead:
+
+```powershell
+$env:COSTOPTI_APPROVAL_WAIT_MINUTES = "1440"
+```
+
+Restart the backend after changing environment variables. The background monitor in `backend/app/main.py` checks due recommendations every five seconds.
+
+## Organizer Demonstration Flow
+
+1. Start the backend and frontend.
+2. Open `http://localhost:4200`.
+3. Show the 20 virtual machines in the resource inventory.
+4. Explain the AI readout and utilization-based analysis.
+5. Show the recommendation cards, including:
+	 - Received time
+	 - Decision deadline
+	 - Approval window
+	 - Estimated monthly savings
+6. Click **Approve** on one recommendation.
+7. The card shows the planned resize, for example `8 vCPU / 32 GB RAM -> 4 vCPU / 16 GB RAM`.
+8. Click **Execute simulation**.
+9. Refresh the inventory and show the updated vCPU, RAM, and monthly cost.
+10. Open **Recent Audit** and select **View resize details**.
+11. Restart the backend for the automatic path.
+12. Leave the new recommendations untouched.
+13. After their deadlines expire, the monitor automatically approves and executes them.
+14. Show the automatic audit message, health-check result, and before/after resize values.
+
+The **Healthy resources** card is clickable. It opens a detail panel showing each resource's utilization, cost, idle time, criticality, and why no immediate optimization was suggested.
+
+## API Endpoints
+
+- `GET /` - backend health check
+- `GET /resources` - current simulated VM inventory
+- `GET /metrics` - seven days of simulated CPU and RAM metrics
+- `GET /analysis` - utilization, safety, and savings analysis
+- `GET /agent/summary` - AI or local fallback summary
+- `GET /recommendations` - recommendations and their statuses
+- `POST /recommendations/{id}/approve` - manual approval
+- `POST /recommendations/{id}/reject` - manual rejection
+- `POST /recommendations/{id}/execute` - execute an approved recommendation
+- `GET /audit-logs` - persisted approval and execution history
+- `GET /docs` - interactive Swagger documentation
+
+The API uses CORS for the local Angular origins `localhost:4200` and `127.0.0.1:4200`.
+
+## Persistence And Reset Behavior
+
+Simulated VM data is stored in `_SIMULATED_VIRTUAL_MACHINES` in `backend/app/simulator.py`. The VM state is held in memory and resets when the backend restarts.
+
+Recommendations and audit logs are stored in `backend/costopti.db`, which is excluded from Git by `.gitignore`.
+
+- `recommendations` stores recommendation status, deadline, decision note, and savings estimate.
+- `audit_logs` stores manual decisions, simulated executions, health-check outcomes, and resize details.
+
+The startup seeding logic reuses existing recommendation rows where possible and fills the pending demo batch without creating duplicates.
+
+## AI Summary
+
+`backend/app/ai_agent.py` provides the `/agent/summary` response. Without external configuration, it uses a safe local fallback summary. An optional OpenAI-compatible service can be configured with:
+
+```powershell
+$env:LLM_API_URL = "https://example.com/v1/chat/completions"
+$env:LLM_API_KEY = "your-key"
+$env:LLM_MODEL = "your-model"
+```
+
+The AI component summarizes findings only. It cannot approve, execute, or modify simulator resources.
+
+## Safety Behavior
+
+- Production-resource changes are blocked.
+- Non-production execution runs a health check.
+- Failed health checks restore the original simulated VM state.
+- Manual approval does not execute a resize by itself.
+- Automatic approval runs the same safety and health checks.
+- All decisions and executions are recorded in SQLite audit logs.
+
+## Testing
+
+Run all backend tests:
+
+```powershell
+cd backend
+python -m unittest discover -s tests -p "test_*.py" -v
+```
+
+The suite covers:
+
+- 20 simulated resources and 140 weekly metrics
+- Underutilization analysis and recommendation creation
+- Multiple randomized demo recommendations
+- Pending-batch filling and duplicate prevention
+- Manual approval and execution
+- Automatic approval after expiry
+- Audit persistence
+- Resize details
+
+Build the Angular dashboard:
+
+```powershell
+cd frontend
+npm run build
+```
+
+Run an API smoke test manually through `http://127.0.0.1:8000/docs` or import the Postman collection from `postman/AI-Cloud-Cost-Optimizer.postman_collection.json`.
