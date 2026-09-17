@@ -30,6 +30,7 @@ export class App implements OnDestroy {
   protected readonly selectedHealthyResource = signal<VirtualMachine | null>(null);
 
   protected readonly pendingRecommendations = () => this.recommendations().filter((item) => item.status === 'pending_approval');
+  protected readonly reviewRecommendations = () => this.recommendations().filter((item) => ['pending_approval', 'approved'].includes(item.status));
   protected readonly activeRecommendations = () => this.pendingRecommendations();
   protected readonly totalMonthlyCost = () => this.resources().reduce((total, item) => total + item.monthly_cost_inr, 0);
   protected readonly totalSavings = () => this.activeRecommendations().reduce((total, item) => total + item.estimated_monthly_savings_inr, 0);
@@ -114,6 +115,29 @@ export class App implements OnDestroy {
     return 'No pending action is currently waiting for approval.';
   }
 
+  protected resourceForRecommendation(recommendation: Recommendation): VirtualMachine | undefined {
+    return this.resources().find((resource) => resource.id === recommendation.resource_id);
+  }
+
+  protected plannedVcpus(recommendation: Recommendation): number {
+    const resource = this.resourceForRecommendation(recommendation);
+    return resource ? Math.max(1, Math.floor(resource.vcpus / 2)) : 0;
+  }
+
+  protected plannedRam(recommendation: Recommendation): number {
+    const resource = this.resourceForRecommendation(recommendation);
+    return resource ? Math.max(1, Math.floor(resource.ram_gb / 2)) : 0;
+  }
+
+  protected recommendationReceivedAt(recommendation: Recommendation): Date | null {
+    if (!recommendation.approval_deadline) {
+      return null;
+    }
+    const deadline = new Date(recommendation.approval_deadline);
+    deadline.setMinutes(deadline.getMinutes() - recommendation.waiting_period_hours);
+    return deadline;
+  }
+
   protected execute(recommendation: Recommendation): void {
     this.busyRecommendation.set(recommendation.id);
     this.executionMessage.set('');
@@ -138,7 +162,7 @@ interface Analysis {
 
 interface Recommendation {
   id: string; resource_id: string; resource_name: string; action: string;
-  estimated_monthly_savings_inr: number; waiting_period_hours: number; status: string; decision_note: string | null;
+  estimated_monthly_savings_inr: number; waiting_period_hours: number; status: string; decision_note: string | null; approval_deadline: string | null;
 }
 
 interface AgentSummary { summary: string; source: string; }

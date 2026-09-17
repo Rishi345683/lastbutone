@@ -192,3 +192,27 @@
   margin-top: 5px;
   line-height: 1.4;
 }
+
+:host .planned-resize {
+  margin: 10px 0 0;
+  padding: 9px 10px;
+  border-left: 3px solid #d39b42;
+  background: #fff8e9;
+  color: #73521b;
+  font-size: 0.82rem;
+}
+
+:host .recommendation-timing {
+  margin: 10px 0 0;
+  color: #718079;
+  font-size: 0.75rem;
+}
+
+:host .recommendation-timing strong {
+  color: #52645d;
+}
+
+:host .recommendation-timing span {
+  padding: 0 5px;
+  color: #a0ada6;
+}

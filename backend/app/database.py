@@ -14,6 +14,7 @@ DATABASE_PATH = Path(
     )
 )
 APPROVAL_WAIT_MINUTES = int(os.getenv("COSTOPTI_APPROVAL_WAIT_MINUTES", "3"))
+DEMO_RECOMMENDATION_COUNT = int(os.getenv("COSTOPTI_DEMO_RECOMMENDATION_COUNT", "3"))
 
 
 def get_connection() -> sqlite3.Connection:

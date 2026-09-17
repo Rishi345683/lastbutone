@@ -58,36 +58,30 @@ class BackendWorkflowTests(unittest.TestCase):
 
         refreshed = list_saved_recommendations()
         pending = [item for item in refreshed if item.status == "pending_approval"]
-        self.assertEqual(len(pending), 1)
+        self.assertEqual(len(pending), 3)
         self.assertEqual(len({item.resource_id for item in refreshed}), 12)
         self.assertEqual(pending[0].waiting_period_hours, 3)
-        self.assertIsNotNone(pending[0].approval_deadline)
+        self.assertTrue(all(item.approval_deadline for item in pending))
+        self.assertEqual(len({item.resource_id for item in pending}), 3)
 
-    def test_demo_seed_rotates_to_a_different_candidate(self) -> None:
-        list_recommendations()
-        with get_connection() as connection:
-            connection.execute(
-                "UPDATE recommendations SET status = 'optimized' WHERE status = 'pending_approval'"
-            )
+    def test_demo_seed_fills_partial_pending_batch(self) -> None:
+        recommendations = list_recommendations()
+        for recommendation in recommendations:
+            recommendation.status = "optimized"
+            update_recommendation(recommendation)
+
+        first_pending = recommendations[0]
+        first_pending.status = "pending_approval"
+        update_recommendation(first_pending)
         ensure_demo_recommendation()
-        first_demo_resource = next(
-            item.resource_id
+
+        pending = [
+            item
             for item in list_saved_recommendations()
             if item.status == "pending_approval"
-        )
-
-        with get_connection() as connection:
-            connection.execute(
-                "UPDATE recommendations SET status = 'optimized' WHERE status = 'pending_approval'"
-            )
-
-        ensure_demo_recommendation()
-        second_demo_resource = next(
-            item.resource_id
-            for item in list_saved_recommendations()
-            if item.status == "pending_approval"
-        )
-        self.assertNotEqual(first_demo_resource, second_demo_resource)
+        ]
+        self.assertEqual(len(pending), 3)
+        self.assertEqual(len({item.resource_id for item in pending}), 3)
 
     def test_execution_requires_approval_and_persists_audit(self) -> None:
         recommendation = list_recommendations()[0]
@@ -110,7 +104,11 @@ class BackendWorkflowTests(unittest.TestCase):
 
         self.assertIsNotNone(result)
         self.assertEqual(result[0].status, "optimized")
-        self.assertEqual(len(list_saved_audit_logs()), 1)
+        audit_logs = list_saved_audit_logs()
+        self.assertEqual(len(audit_logs), 2)
+        self.assertEqual(audit_logs[0].action, "approval_decision")
+        self.assertEqual(audit_logs[0].status, "approved")
+        self.assertIn("Planned optimization:", audit_logs[0].message)
         self.assertIn(expected_resize, result[3])
 
     def test_expired_recommendation_is_auto_optimized(self) -> None:

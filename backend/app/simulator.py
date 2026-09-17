@@ -1,8 +1,10 @@
 from datetime import datetime, timedelta, timezone
+import random
 from typing import List, Optional
 
 from .database import (
     APPROVAL_WAIT_MINUTES,
+    DEMO_RECOMMENDATION_COUNT,
     initialize_database,
     list_saved_audit_logs,
     list_saved_recommendations,
@@ -403,76 +405,63 @@ def list_recommendations() -> List[Recommendation]:
 
 
 def ensure_demo_recommendation() -> None:
-    """Ensure the demo starts with one fresh pending recommendation."""
+    """Ensure the demo starts with a fresh batch of pending recommendations."""
     recommendations = list_saved_recommendations()
-    if any(item.status == "pending_approval" for item in recommendations):
+    pending_resource_ids = {
+        item.resource_id
+        for item in recommendations
+        if item.status == "pending_approval"
+    }
+    if len(pending_resource_ids) >= DEMO_RECOMMENDATION_COUNT:
         return
 
     candidates = [item for item in analyze_resources() if item.underutilized]
     if not candidates:
         return
 
-    existing_by_resource = {
-        item.resource_id: item
+    recommendation_ids = [
+        int(item.id.removeprefix("rec-"))
         for item in recommendations
-        if item.resource_id in {candidate.resource_id for candidate in candidates}
-    }
-    last_demo_resource_id = None
-    dated_recommendations = [
-        item
-        for item in existing_by_resource.values()
-        if item.approval_deadline
+        if item.id.startswith("rec-") and item.id.removeprefix("rec-").isdigit()
     ]
-    if dated_recommendations:
-        last_demo_resource_id = max(
-            dated_recommendations,
-            key=lambda item: datetime.fromisoformat(item.approval_deadline),
-        ).resource_id
-
-    start_index = next(
-        (
-            index
-            for index, candidate in enumerate(candidates)
-            if candidate.resource_id == last_demo_resource_id
+    next_id = max(recommendation_ids, default=0) + 1
+    existing_by_resource = {item.resource_id: item for item in recommendations}
+    selected_candidates = random.sample(
+        [candidate for candidate in candidates if candidate.resource_id not in pending_resource_ids],
+        min(
+            max(0, DEMO_RECOMMENDATION_COUNT - len(pending_resource_ids)),
+            len(candidates) - len(pending_resource_ids),
         ),
-        -1,
     )
-    candidate = candidates[(start_index + 1) % len(candidates)]
-
-    existing = next(
-        (item for item in recommendations if item.resource_id == candidate.resource_id),
-        None,
-    )
-    if existing is None:
-        recommendation_ids = [
-            int(item.id.removeprefix("rec-"))
-            for item in recommendations
-            if item.id.startswith("rec-") and item.id.removeprefix("rec-").isdigit()
-        ]
-        recommendation = Recommendation(
-            id=f"rec-{max(recommendation_ids, default=0) + 1:03d}",
-            resource_id=candidate.resource_id,
-            resource_name=candidate.resource_name,
-            action=candidate.recommendation,
-            estimated_monthly_savings_inr=candidate.estimated_monthly_savings_inr,
-            waiting_period_hours=APPROVAL_WAIT_MINUTES,
-            status="pending_approval",
-            approval_deadline=(
-                datetime.now(timezone.utc)
-                + timedelta(minutes=APPROVAL_WAIT_MINUTES)
-            ).isoformat(),
+    for candidate in selected_candidates:
+        deadline_seconds = random.randint(
+            max(30, APPROVAL_WAIT_MINUTES * 30),
+            max(30, APPROVAL_WAIT_MINUTES * 60),
         )
-        save_recommendation(recommendation)
-        return
-
-    existing.status = "pending_approval"
-    existing.decision_note = None
-    existing.waiting_period_hours = APPROVAL_WAIT_MINUTES
-    existing.approval_deadline = (
-        datetime.now(timezone.utc)
-        + timedelta(minutes=APPROVAL_WAIT_MINUTES)
-    ).isoformat()
-    update_recommendation(existing)
+        approval_deadline = (
+            datetime.now(timezone.utc) + timedelta(seconds=deadline_seconds)
+        ).isoformat()
+        existing = existing_by_resource.get(candidate.resource_id)
+        if existing is None:
+            save_recommendation(
+                Recommendation(
+                    id=f"rec-{next_id:03d}",
+                    resource_id=candidate.resource_id,
+                    resource_name=candidate.resource_name,
+                    action=candidate.recommendation,
+                    estimated_monthly_savings_inr=candidate.estimated_monthly_savings_inr,
+                    waiting_period_hours=APPROVAL_WAIT_MINUTES,
+                    status="pending_approval",
+                    approval_deadline=approval_deadline,
+                )
+            )
+            next_id += 1
+        else:
+            existing.status = "pending_approval"
+            existing.decision_note = None
+            existing.waiting_period_hours = APPROVAL_WAIT_MINUTES
+            existing.approval_deadline = approval_deadline
+            update_recommendation(existing)
 
 
 def process_due_recommendations() -> None:
@@ -504,6 +493,34 @@ def decide_recommendation(
             recommendation.status = status
             recommendation.decision_note = note
             update_recommendation(recommendation)
+            decision_message = f"Recommendation manually {status} by the user."
+            if status == "approved":
+                virtual_machine = next(
+                    (
+                        item
+                        for item in _SIMULATED_VIRTUAL_MACHINES
+                        if item.id == recommendation.resource_id
+                    ),
+                    None,
+                )
+                if virtual_machine is not None:
+                    decision_message += (
+                        f" Planned optimization: {virtual_machine.vcpus} vCPU/"
+                        f"{virtual_machine.ram_gb} GB RAM to "
+                        f"{max(1, virtual_machine.vcpus // 2)} vCPU/"
+                        f"{max(1, virtual_machine.ram_gb // 2)} GB RAM."
+                    )
+            if note:
+                decision_message += f" Note: {note}"
+            save_audit_log(
+                AuditLogEntry(
+                    recommendation_id=recommendation.id,
+                    resource_id=recommendation.resource_id,
+                    action="approval_decision",
+                    status=status,
+                    message=decision_message,
+                )
+            )
             return recommendation
     return None
 

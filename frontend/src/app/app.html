@@ -38,7 +38,7 @@
 
       <aside class="side-column">
         <section class="agent-panel"><div class="panel-heading"><span class="spark">✦</span><div><p class="eyebrow">AI READOUT</p><h3>What the data says</h3></div><span class="source">{{ agentSummary()?.source }}</span></div><p>{{ agentSummary()?.summary }}</p><div class="agent-rule"></div><span class="panel-foot">Analysis only · actions always require approval</span></section>
-        <section class="recommendations-panel"><div class="section-heading compact"><div><p class="eyebrow accent">REVIEW QUEUE</p><h3>Recommendations</h3></div><span class="section-count">3 min wait</span></div>
+        <section class="recommendations-panel"><div class="section-heading compact"><div><p class="eyebrow accent">REVIEW QUEUE</p><h3>Recommendations</h3></div><span class="section-count">staggered review window</span></div>
           @if (pendingRecommendations().length === 0) {
             <article class="recommendation recommendation-done">
               <div class="recommendation-top"><span class="rec-id">NONE</span><span class="status-pill approved">all clear</span></div>
@@ -46,11 +46,13 @@
               <p>Everything currently looks stable based on the latest simulated health scan.</p>
             </article>
           }
-          @for (recommendation of pendingRecommendations(); track recommendation.id) {
+          @for (recommendation of reviewRecommendations(); track recommendation.id) {
             <article class="recommendation" [class.recommendation-done]="recommendation.status !== 'pending_approval'">
               <div class="recommendation-top"><span class="rec-id">{{ recommendation.id }}</span><span class="status-pill" [class]="statusClass(recommendation.status)">{{ recommendation.status.replaceAll('_', ' ') }}</span></div>
               <h4>{{ recommendation.resource_name }}</h4>
               <p>{{ recommendation.action }}</p>
+              @if (recommendation.approval_deadline) { <p class="recommendation-timing"><strong>Received:</strong> {{ recommendationReceivedAt(recommendation) | date:'shortTime' }} <span>·</span> <strong>Decision by:</strong> {{ recommendation.approval_deadline | date:'shortTime' }} <span>·</span> {{ recommendation.waiting_period_hours }} min window</p> }
+              @if (recommendation.status === 'approved') { <p class="planned-resize"><strong>Planned optimization:</strong> {{ resourceForRecommendation(recommendation)?.vcpus }} vCPU / {{ resourceForRecommendation(recommendation)?.ram_gb }} GB RAM → {{ plannedVcpus(recommendation) }} vCPU / {{ plannedRam(recommendation) }} GB RAM</p> }
               <div class="rec-bottom">
                 <strong>₹{{ recommendation.estimated_monthly_savings_inr | number:'1.0-0' }}<small>/ month</small></strong>
                 @if (recommendation.status === 'pending_approval') {
